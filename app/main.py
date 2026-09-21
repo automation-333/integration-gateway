@@ -15,6 +15,14 @@ from app.models import EventRecord
 from app.schemas import EventIn, EventOut, HealthOut, RetryOut
 
 
+DbSession = Annotated[Session, Depends(get_db)]
+AppSettings = Annotated[Settings, Depends(get_settings)]
+IdempotencyKey = Annotated[
+    str,
+    Header(alias="Idempotency-Key", min_length=1, max_length=200),
+]
+
+
 def normalize_payload(payload: EventIn) -> tuple[dict, str, str]:
     payload_dict = payload.model_dump(mode="json")
     normalized = json.dumps(
@@ -118,7 +126,7 @@ def health() -> HealthOut:
 
 
 @app.get("/ready", response_model=HealthOut)
-def ready(db: Session = Depends(get_db)) -> HealthOut:
+def ready(db: DbSession) -> HealthOut:
     db.execute(text("SELECT 1"))
     return HealthOut(status="ready")
 
@@ -127,12 +135,9 @@ def ready(db: Session = Depends(get_db)) -> HealthOut:
 async def ingest_event(
     payload: EventIn,
     response: Response,
-    idempotency_key: Annotated[
-        str,
-        Header(alias="Idempotency-Key", min_length=1, max_length=200),
-    ],
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    idempotency_key: IdempotencyKey,
+    db: DbSession,
+    settings: AppSettings,
 ) -> EventOut:
     payload_dict, normalized, digest = normalize_payload(payload)
 
@@ -175,7 +180,7 @@ async def ingest_event(
 
 
 @app.get("/v1/events/{event_id}", response_model=EventOut)
-def get_event(event_id: str, db: Session = Depends(get_db)) -> EventOut:
+def get_event(event_id: str, db: DbSession) -> EventOut:
     record = db.get(EventRecord, event_id)
     if not record:
         raise HTTPException(
@@ -188,8 +193,8 @@ def get_event(event_id: str, db: Session = Depends(get_db)) -> EventOut:
 @app.post("/v1/events/{event_id}/retry", response_model=RetryOut)
 async def retry_event(
     event_id: str,
-    db: Session = Depends(get_db),
-    settings: Settings = Depends(get_settings),
+    db: DbSession,
+    settings: AppSettings,
 ) -> RetryOut:
     record = db.get(EventRecord, event_id)
     if not record:
