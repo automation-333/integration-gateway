@@ -4,7 +4,6 @@ from typing import Any
 
 import httpx
 
-
 RETRYABLE_STATUS_CODES = {408, 425, 429}
 
 
